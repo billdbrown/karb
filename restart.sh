@@ -17,6 +17,13 @@ cd "$(dirname "$0")"
 # so it prompts, finds no tty, and fails after the checks have already passed.
 if [ "$(id -u)" = 0 ]; then SUDO=; else SUDO=sudo; fi
 
+# The service's own configuration is the authority on where things live. Without
+# this, running as root resolves ~ to /root and the checks below look for
+# users.json somewhere it was never going to be - the same "as root, ~ is /root"
+# trap that already cost this household a Google Health token once.
+# set -a so the values reach the python below, not just this shell.
+if [ -r /etc/karb.env ]; then set -a; . /etc/karb.env; set +a; fi
+
 python3 -m py_compile karb_server.py track_backend.py merge_db.py
 echo "syntax ok"
 
@@ -41,4 +48,4 @@ if ! $SUDO systemctl is-active --quiet karb; then
   $SUDO journalctl -u karb -n 20 --no-pager
   exit 1
 fi
-curl -fsS http://127.0.0.1:8080/healthz && echo "  <- serving"
+curl -fsS "http://${KARB_BIND:-127.0.0.1:8080}/healthz" && echo "  <- serving"
