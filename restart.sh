@@ -11,6 +11,12 @@
 set -e
 cd "$(dirname "$0")"
 
+# Emily runs this as herself and needs sudo; Bill reaches the box as root over
+# SSH and does not. Calling sudo anyway breaks that second case, because sudo
+# ties its cached credential to a terminal and a non-interactive ssh has none -
+# so it prompts, finds no tty, and fails after the checks have already passed.
+if [ "$(id -u)" = 0 ]; then SUDO=; else SUDO=sudo; fi
+
 python3 -m py_compile karb_server.py track_backend.py merge_db.py
 echo "syntax ok"
 
@@ -28,11 +34,11 @@ except ValueError as e:
 print("users.json ok, %d mapped" % n)
 PY
 
-sudo systemctl restart karb
+$SUDO systemctl restart karb
 sleep 2
-if ! sudo systemctl is-active --quiet karb; then
+if ! $SUDO systemctl is-active --quiet karb; then
   echo "karb did NOT come back:"
-  sudo journalctl -u karb -n 20 --no-pager
+  $SUDO journalctl -u karb -n 20 --no-pager
   exit 1
 fi
 curl -fsS http://127.0.0.1:8080/healthz && echo "  <- serving"
