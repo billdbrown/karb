@@ -425,6 +425,43 @@ def summary(user_id, day):
     }
 
 
+_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def calendar_range(user_id, start, end):
+    """Per-day totals across a date window - one row per day that has entries.
+
+    The calendar wants a month at a time. Calling summary() 31 times would give
+    the same answer, at the cost of 31 round trips and 31 identical
+    targets_get() calls for a number that cannot change between them. This is
+    one GROUP BY and one target.
+
+    Days with nothing logged are absent rather than zero-filled: "logged
+    nothing" and "logged a 0 kcal day" are different facts, and only the client
+    knows which days it is drawing.
+    """
+    if not (_YMD.match(start or "") and _YMD.match(end or "")):
+        raise ValueError("from/to must be YYYY-MM-DD")
+    if start > end:
+        start, end = end, start
+    conn = db()
+    rows = conn.execute(
+        "SELECT day, SUM(kcal) AS kcal, SUM(protein_g) AS protein_g, "
+        "COUNT(*) AS entries FROM diary "
+        "WHERE user_id=? AND day>=? AND day<=? GROUP BY day ORDER BY day",
+        (user_id, start, end)).fetchall()
+    conn.close()
+    t = targets_get(user_id)
+    return {
+        "from": start, "to": end,
+        "target": t["target"], "protein_target": t["protein_target"],
+        "days": [{"day": r["day"],
+                  "kcal": round(r["kcal"] or 0, 1),
+                  "protein_g": round(r["protein_g"] or 0, 1),
+                  "entries": r["entries"]} for r in rows],
+    }
+
+
 # ---------------------------------------------------------------- items
 def _item_row(row):
     d = dict(row)
@@ -1087,6 +1124,9 @@ def handle_get(path, q):
         return items_barcode((q.get("code") or [""])[0])
     if sub == "/targets":
         return targets_get(require_user(user))
+    if sub == "/calendar":
+        return calendar_range(require_user(user),
+                              (q.get("from") or [""])[0], (q.get("to") or [""])[0])
     raise ValueError("unknown route: " + path)
 
 

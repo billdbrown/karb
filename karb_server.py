@@ -139,16 +139,44 @@ class Handler(SimpleHTTPRequestHandler):
         there is no version of this where the browser's claim is consulted.
         """
         uid = self._identity()
-        if uid is None:
-            return True            # picker mode: leave the client's value be
         if uid is False:
             self._json({"error": "not authenticated"}, 403)
             return False
+        if uid is None:
+            # picker mode: there is no authenticated identity, so the client's
+            # own claim is all there is. Read it so `view` below still works.
+            uid = ((q.get("user") or [None])[0] if q is not None
+                   else (body or {}).get("user"))
         if q is not None:
-            q["user"] = [uid]
+            # `view` switches whose day you are READING, never who you write
+            # as. Karb is a household tracker - `items` is already a shared
+            # library and /diary/household writes for both people - so either
+            # of them seeing the other's day is the intended feature rather
+            # than a leak. It is GET-only by construction: this branch is the
+            # only place `view` is ever read, and POST bodies never reach it.
+            # An unknown id falls through to require_user(), which 400s.
+            q["user"] = [(q.get("view") or [None])[0] or uid]
         if body is not None:
             body["user"] = uid
         return True
+
+    def _whoami(self):
+        """Who the server believes you are, so the client never has to ask.
+
+        Karb used to open with a name picker because the server had no way to
+        know. Behind Access it does, and asking the person to re-state it was
+        both redundant and misleading - the answer was never used for anything
+        the server trusted.
+        """
+        users = track_backend.list_users()
+        if AUTH_MODE == "picker":
+            return self._json({"mode": "picker", "user": None, "users": users})
+        uid = self._identity()
+        if uid is False:
+            return self._json({"error": "not authenticated"}, 403)
+        label = next((u["display_name"] for u in users if u["id"] == uid), uid)
+        return self._json({"mode": "access", "user": uid,
+                           "display_name": label, "users": users})
 
     # ---- GET -------------------------------------------------------------
     def do_GET(self):
@@ -159,6 +187,9 @@ class Handler(SimpleHTTPRequestHandler):
             # For the tunnel and for `systemctl status` at a glance. No identity
             # check: it reveals nothing and must answer before Access is wired.
             return self._json({"ok": True, "auth": AUTH_MODE})
+
+        if p.path == "/api/track/whoami":
+            return self._whoami()
 
         if p.path.startswith("/api/track/"):
             if not self._apply_identity(q=q):
