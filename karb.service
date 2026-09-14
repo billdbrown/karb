@@ -1,0 +1,50 @@
+# Karb - nutrition tracker. Runs on LXC 110 (karb.lan, 192.168.0.110).
+#
+# Install / update (as root):
+#   cp /home/emily/karb/karb.service /etc/systemd/system/karb.service
+#   systemctl daemon-reload && systemctl restart karb
+#
+# Configuration lives in /etc/karb.env, NOT here, because the settings that
+# change between "testing on the LAN" and "published through the tunnel" are
+# exactly the two that must never be edited by accident - the bind address and
+# the auth mode. Keeping them in one small file makes the cutover a diff.
+#
+# Only EnvironmentFile= is used, never Environment=. Home Dock's sibling app
+# ORDER UP! was bitten by mixing them: systemd applies EnvironmentFile AFTER
+# Environment, so a value set in the unit silently loses to the file.
+
+[Unit]
+Description=Karb nutrition tracker
+After=network.target
+
+[Service]
+Type=simple
+User=emily
+Group=emily
+WorkingDirectory=/home/emily/karb
+EnvironmentFile=/etc/karb.env
+ExecStart=/usr/bin/python3 /home/emily/karb/karb_server.py
+
+# Only needed while KARB_BIND uses port 80 for LAN testing. Once cloudflared
+# fronts this on 127.0.0.1:8080 the capability is dead weight and should go.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+Restart=always
+RestartSec=2
+
+# ProtectHome=read-only keeps this out of everything under /home, including
+# ~/.karb-secrets - which it must READ (the Anthropic key, the email->user map)
+# and must never write.
+#
+# ReadWritePaths deliberately excludes the project directory, so a bug in an
+# internet-reachable server cannot rewrite karb.html or the code serving it.
+# The one hole is the data directory: the SQLite database and item images.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/emily/karb-data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+# Everything here is deployed to Linux. A CRLF in karb.env becomes a trailing
+# \r on every value, and systemd will happily bind to "8080\r".
+* text=auto eol=lf
+vendor/zxing.min.js -text

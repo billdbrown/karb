@@ -1,0 +1,12 @@
+# Data and secrets live outside the project directory (karb-data/,
+# .karb-secrets/) so neither can be served by accident. These entries are a
+# net under that, not the policy itself.
+karb-data/
+*.db
+*.db-wal
+*.db-shm
+*.backup-*
+users.json
+anthropic.json
+__pycache__/
+*.pyc

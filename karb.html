@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Karb</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%A5%97</text></svg>">
+<style>
+/* Cronometer-inspired palette, simplified. Auto light/dark via
+   prefers-color-scheme (no in-app toggle - matches the house style this app
+   is meant to eventually adopt on bill.computer). */
+:root{
+  --bg:#F5F6F3; --card:#FFFFFF; --border:#E4E7E1; --text:#1E2420; --muted:#767F76;
+  --accent:#0E9C86; --accent-d:#0B7C6B; --orange:#FF7A3D;
+  --ring-consumed:#1FA97C; --ring-consumed-over:#7C5CD4; --ring-track:#E7EAE5;
+  --ring-remain-over:#FF7A3D;
+  --danger:#D64545; --shadow:0 1px 3px rgba(20,30,25,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#121613; --card:#1B211C; --border:#2A322B; --text:#EDF1EC; --muted:#8B948B;
+    --accent:#28C4A8; --accent-d:#59DABF; --orange:#FF8F5C;
+    --ring-consumed:#28C4A8; --ring-consumed-over:#A98AF5; --ring-track:#26302A;
+    --ring-remain-over:#FF8F5C;
+    --danger:#F17272; --shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+}
+/* This behaves like an app, not a document - no native text-selection
+   drag-handles/lookup popup while scrolling, and no tap-flash on buttons
+   and rows. Form fields opt back into normal selection since you do need
+   to edit/copy what you type there. */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+*{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
+input,textarea{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  padding-bottom:78px;overscroll-behavior-y:none;}
+button,input,select,textarea{font:inherit;color:inherit;}
+a{color:var(--accent-d);}
+h1,h2,h3{margin:0;}
+.hidden{display:none!important;}
+
+/* ---------------- picker ---------------- */
+#picker{
+  position:fixed;inset:0;background:var(--bg);z-index:200;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px;
+}
+#picker h1{font-size:30px;}
+#picker .sub{color:var(--muted);font-size:14px;margin-top:-14px;}
+.picker-btn{
+  width:220px;padding:18px;border-radius:16px;border:1px solid var(--border);
+  background:var(--card);box-shadow:var(--shadow);font-size:18px;font-weight:700;cursor:pointer;
+}
+.picker-btn:active{background:var(--accent);color:#fff;}
+
+/* ---------------- topbar ---------------- */
+header.topbar{
+  position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;padding:12px 16px;
+}
+.brand{font-weight:800;font-size:19px;}
+.brand .g{color:var(--accent);}
+.datebar{flex:1;display:flex;align-items:center;justify-content:center;gap:14px;}
+.datebar button{border:none;background:none;font-size:20px;color:var(--muted);cursor:pointer;padding:4px 8px;}
+.datebar .label{font-weight:700;font-size:15px;min-width:90px;text-align:center;}
+.icon-btn{border:none;background:none;font-size:20px;cursor:pointer;color:var(--muted);padding:4px 6px;display:flex;}
+.settings-wrap{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.user-tag{font-size:10px;color:var(--muted);opacity:.8;line-height:1;}
+
+/* ---------------- main / diary ---------------- */
+main{max-width:640px;margin:0 auto;padding:16px;}
+/* One ring, not three: Expenditure was reference data, not something with a
+   "progress" - there's nothing to fill toward - so it doesn't earn a ring.
+   The ring fills as you eat (consumed/target); the center shows the number
+   people actually act on, Remaining. Absolute-positioned center text (not
+   the old negative-margin trick) so labels can never collide with the ring. */
+.ring-block{display:flex;flex-direction:column;align-items:center;margin-bottom:16px;}
+.ring-single{position:relative;width:190px;height:190px;}
+.ring-single svg{width:190px;height:190px;}
+.ring-center{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;}
+.ring-big{font-size:36px;font-weight:800;line-height:1;}
+.ring-biglabel{font-size:12px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.5px;margin-top:5px;}
+.ring-detail{font-size:13px;color:var(--muted);margin-top:10px;text-align:center;}
+.ring-detail b{color:var(--text);font-weight:700;}
+
+.macro-strip{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:12px 14px;margin-bottom:16px;box-shadow:var(--shadow);}
+.macro-row{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12.5px;}
+.macro-sep{border-top:1px dashed var(--border);margin:6px 0;}
+.macro-name{width:56px;color:var(--muted);font-weight:600;}
+.macro-bar{flex:1;height:7px;border-radius:4px;background:var(--ring-track);overflow:hidden;}
+.macro-bar > i{display:block;height:100%;background:var(--accent);border-radius:4px;}
+.macro-val{width:64px;text-align:right;color:var(--muted);}
+
+.meal{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  margin-bottom:12px;box-shadow:var(--shadow);overflow:hidden;}
+.meal-head{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;}
+.meal-head .name{font-weight:700;flex:1;}
+.meal-head .kcal{color:var(--muted);font-size:13px;}
+.meal-add{border:none;background:var(--accent);color:#fff;width:26px;height:26px;border-radius:50%;
+  font-size:16px;line-height:26px;text-align:center;cursor:pointer;flex-shrink:0;}
+.meal-chevron{color:var(--muted);font-size:13px;width:16px;text-align:center;flex-shrink:0;margin:0 8px;}
+.meal-body{border-top:1px solid var(--border);}
+.item-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
+.item-row:last-child{border-bottom:none;}
+.item-row:active{background:var(--bg);}
+.item-name{flex:1;min-width:0;}
+.item-title{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.item-amt{font-size:12px;color:var(--muted);}
+.item-kcal{font-size:13px;font-weight:700;color:var(--muted);}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:16px;}
+
+/* ---------------- pill field ----------------
+   A rounded, icon-plus-clear-button input bar (search, URL, anywhere a
+   single-line field wants the modern "search bar" treatment instead of a
+   bare bordered box). */
+.pill-field{display:flex;align-items:center;gap:8px;background:var(--card);
+  border:1px solid var(--border);border-radius:999px;padding:9px 14px;margin-bottom:12px;}
+.pill-field:focus-within{border-color:var(--accent);}
+.pill-icon{font-size:14px;line-height:1;opacity:.55;flex-shrink:0;}
+.pill-field input{flex:1;min-width:0;border:none;background:none;padding:0;
+  font-size:15px;outline:none;}
+.pill-field input::placeholder{color:var(--muted);}
+.pill-clear{border:none;background:var(--border);color:var(--muted);
+  width:18px;height:18px;border-radius:50%;font-size:10px;line-height:1;
+  display:flex;align-items:center;justify-content:center;padding:0;
+  cursor:pointer;flex-shrink:0;}
+
+/* ---------------- library ---------------- */
+.list-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  box-shadow:var(--shadow);overflow:hidden;margin-bottom:14px;}
+.list-row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
+.list-row:last-child{border-bottom:none;}
+.list-row:active{background:var(--bg);}
+.list-thumb{width:40px;height:40px;border-radius:8px;background:var(--ring-track);
+  background-size:cover;background-position:center;flex-shrink:0;}
+.list-emoji{display:flex;align-items:center;justify-content:center;font-size:20px;}
+.list-sub{font-size:12px;color:var(--muted);}
+.fab-new{width:100%;padding:12px;border-radius:12px;border:1px dashed var(--border);
+  background:none;color:var(--accent-d);font-weight:700;cursor:pointer;margin-bottom:14px;}
+
+/* ---------------- settings ---------------- */
+.form-row{margin-bottom:14px;}
+.form-row label{display:block;font-size:12px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px;}
+.form-row input,.form-row select,.form-row textarea{
+  width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
+  background:var(--card);}
+.form-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.readout{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;
+  margin:14px 0;font-size:14px;box-shadow:var(--shadow);}
+.readout b{color:var(--accent-d);}
+
+/* ---------------- buttons ---------------- */
+.btn{display:inline-block;padding:11px 18px;border-radius:22px;border:none;font-weight:700;
+  font-size:14px;cursor:pointer;}
+.btn.primary{background:var(--accent);color:#fff;}
+.btn.primary:active{background:var(--accent-d);}
+.btn.ghost{background:var(--bg);color:var(--text);border:1px solid var(--border);}
+.btn.danger{background:none;color:var(--danger);border:1px solid var(--danger);}
+.btn.block{display:block;width:100%;text-align:center;}
+.btn[disabled]{opacity:.5;}
+
+/* ---------------- tabbar ---------------- */
+nav.tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--card);
+  border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-around;
+  padding:8px 10px calc(8px + env(safe-area-inset-bottom));z-index:20;}
+.tab-btn{border:none;background:none;color:var(--muted);font-size:12px;font-weight:700;
+  display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;flex:1;}
+.tab-btn .ic{font-size:20px;}
+.tab-btn.on{color:var(--accent-d);}
+.tab-plus{width:52px;height:52px;border-radius:50%;background:var(--orange);color:#fff;
+  border:none;font-size:28px;line-height:52px;text-align:center;cursor:pointer;margin-top:-22px;
+  box-shadow:0 3px 10px rgba(255,122,61,.4);}
+
+/* ---------------- modal ---------------- */
+.modal-overlay{position:fixed;inset:0;background:rgba(10,15,12,.45);z-index:100;
+  display:flex;align-items:flex-end;justify-content:center;overscroll-behavior:contain;}
+@media (min-width:640px){.modal-overlay{align-items:center;}}
+.modal{background:var(--card);width:100%;max-width:520px;max-height:88vh;overflow-y:auto;
+  border-radius:20px 20px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+@media (min-width:640px){.modal{border-radius:20px;}}
+/* Describe Food's textarea - a fixed, modest height (not flex-grown to fill
+   the screen) so the modal's total height stays small and predictable and
+   the submit button never ends up fighting the on-screen keyboard for
+   space. resize:vertical gives back manual control for a longer recipe. */
+.composer{display:block;width:100%;height:130px;resize:vertical;font-size:17px;line-height:1.5;padding:16px;
+  border-radius:16px;border:1.5px solid var(--border);background:var(--bg);}
+.composer:focus{border-color:var(--accent);outline:none;}
+.modal-head{display:flex;align-items:center;margin-bottom:14px;}
+.modal-head h2{flex:1;font-size:18px;}
+.modal-close{border:none;background:var(--bg);color:var(--muted);width:30px;height:30px;
+  border-radius:50%;font-size:14px;cursor:pointer;}
+.action-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.action-tile{background:var(--bg);border:1px solid var(--border);border-radius:14px;
+  padding:18px 10px;text-align:center;cursor:pointer;}
+.action-tile .ic{font-size:26px;display:block;margin-bottom:6px;}
+.action-tile .lbl{font-size:12.5px;font-weight:700;}
+.msg{font-size:13px;color:var(--muted);margin:8px 0;}
+.msg.err{color:var(--danger);}
+.seg{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px;}
+.seg button{flex:1;padding:9px;border:none;background:var(--card);cursor:pointer;font-weight:700;font-size:13px;}
+.seg button.on{background:var(--accent);color:#fff;}
+.ingredient-list{font-size:13px;color:var(--muted);line-height:1.6;margin:6px 0 14px;}
+#toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--text);
+  color:var(--bg);padding:10px 18px;border-radius:20px;font-size:13px;z-index:300;
+  opacity:0;transition:opacity .2s;pointer-events:none;}
+#toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<div id="picker">
+  <h1>🥗 Karb</h1>
+  <div class="sub">Who's logging?</div>
+  <div id="picker-btns"></div>
+</div>
+
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand"><span class="g">Karb</span></div>
+    <div class="datebar">
+      <button onclick="shiftDay(-1)">&#8249;</button>
+      <div class="label" id="date-label">Today</div>
+      <button onclick="shiftDay(1)">&#8250;</button>
+    </div>
+    <div class="settings-wrap">
+      <span class="user-tag" id="user-tag"></span>
+      <button class="icon-btn" onclick="showView('settings')" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-diary">
+      <div class="ring-block" id="rings"></div>
+      <div class="macro-strip" id="macros"></div>
+      <div id="meals"></div>
+    </section>
+
+    <section id="view-foods" class="hidden">
+      <div id="foods-body"></div>
+    </section>
+
+    <section id="view-settings" class="hidden">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <button class="icon-btn" onclick="showView('diary')" title="Back" style="font-size:24px;padding:0 4px">&#8249;</button>
+        <h2>Settings</h2>
+      </div>
+      <div id="settings-body"></div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab-btn on" id="tab-diary" onclick="showView('diary')">
+      <span class="ic">&#128213;</span>Diary</button>
+    <button class="tab-plus" onclick="openAddSheet()">+</button>
+    <button class="tab-btn" id="tab-foods" onclick="showView('foods')">
+      <span class="ic">&#127822;</span>Library</button>
+  </nav>
+</div>
+
+<input type="file" id="scan-file" accept="image/*" capture="environment" style="display:none">
+
+<div id="modal-overlay" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head"><h2 id="modal-title"></h2>
+      <button class="modal-close" onclick="closeModal()">&#10005;</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="/vendor/zxing.min.js"></script>
+<script>
+/* ============================================================ helpers */
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MEALS = ['breakfast','lunch','dinner','snacks'];
+const MEAL_LABEL = {breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snacks:'Snacks'};
+const USER_LABEL = {emily:'Emily', bill:'Bill'};
+
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+async function api(path, opts){
+  const res = await fetch('/api/track'+path, opts);
+  let data = {};
+  try { data = await res.json(); } catch(e) {}
+  if (!res.ok) throw new Error(data.error || ('HTTP '+res.status));
+  return data;
+}
+function withUser(path){
+  return path + (path.includes('?') ? '&' : '?') + 'user=' + encodeURIComponent(getUser());
+}
+function post(path, body){
+  return api(path, {method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify(Object.assign({user:getUser()}, body||{}))});
+}
+
+/* Local calendar date, never UTC-derived - a UTC date silently shifts an
+   evening entry onto tomorrow for anyone west of Greenwich. */
+function toLocalYMD(d){
+  const tz = d.getTimezoneOffset()*60000;
+  return new Date(d - tz).toISOString().slice(0,10);
+}
+function todayStr(){ return toLocalYMD(new Date()); }
+function ymdToDate(ymd){ const [y,m,d] = ymd.split('-').map(Number); return new Date(y, m-1, d); }
+function fmtDay(ymd){
+  if (ymd === todayStr()) return 'Today';
+  const d = ymdToDate(ymd);
+  const yest = new Date(); yest.setDate(yest.getDate()-1);
+  if (ymd === toLocalYMD(yest)) return 'Yesterday';
+  return d.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'});
+}
+
+/* ---- units: US on screen, metric underneath (food macros stay metric) */
+const lbToKg = lb => lb * 0.45359237;
+const kgToLb = kg => kg / 0.45359237;
+const ftInToCm = (ft,inch) => ((ft||0)*12 + (inch||0)) * 2.54;
+const cmToFtIn = cm => { const tin = Math.round((cm||0)/2.54); return {ft: Math.floor(tin/12), inch: tin%12}; };
+
+/* ============================================================ user picker */
+function getUser(){ return localStorage.getItem('karbUser'); }
+function setUser(u){ localStorage.setItem('karbUser', u); }
+
+async function boot(){
+  if (!getUser()){ return showPicker(); }
+  $('#picker').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  $('#user-tag').textContent = USER_LABEL[getUser()] || getUser();
+  showView('diary');
+}
+async function showPicker(){
+  $('#app').classList.add('hidden');
+  $('#picker').classList.remove('hidden');
+  try {
+    const d = await api('/users');
+    $('#picker-btns').innerHTML = d.items.map(u =>
+      `<button class="picker-btn" onclick="pickUser('${esc(u.id)}')">${esc(u.display_name)}</button>`
+    ).join('<div style="height:10px"></div>');
+  } catch(e) { $('#picker-btns').innerHTML = '<div class="msg err">Could not reach the server.</div>'; }
+}
+function pickUser(id){ setUser(id); boot(); }
+function switchUser(){ localStorage.removeItem('karbUser'); boot(); }
+
+/* ============================================================ view switching */
+let currentView = 'diary';
+function showView(v){
+  currentView = v;
+  ['diary','foods','settings'].forEach(x => $('#view-'+x).classList.toggle('hidden', x!==v));
+  $('#tab-diary').classList.toggle('on', v==='diary');
+  $('#tab-foods').classList.toggle('on', v==='foods');
+  if (v==='diary') loadDiary();
+  else if (v==='foods') loadFoods();
+  else if (v==='settings') loadSettings();
+}
+
+/* ============================================================ diary */
+let currentDay = todayStr();
+
+function shiftDay(delta){
+  const d = ymdToDate(currentDay); d.setDate(d.getDate()+delta);
+  currentDay = toLocalYMD(d);
+  loadDiary();
+}
+
+function ringSvg(pct, color, track){
+  pct = Math.max(0, Math.min(1, pct||0));
+  const r = 36, c = 2*Math.PI*r, dash = c*pct;
+  return `<svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="${r}" fill="none" stroke="${track}" stroke-width="9"/>
+    <circle cx="42" cy="42" r="${r}" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round"
+      stroke-dasharray="${dash} ${c-dash}" transform="rotate(-90 42 42)"/></svg>`;
+}
+
+async function loadDiary(){
+  $('#date-label').textContent = fmtDay(currentDay);
+  let summary, diary;
+  try {
+    [summary, diary] = await Promise.all([
+      api(withUser('/summary?day='+currentDay)),
+      api(withUser('/diary?day='+currentDay)),
+    ]);
+  } catch(e) { toast(e.message); return; }
+  renderRings(summary);
+  renderMacros(summary.consumed, summary.protein_target);
+  renderMeals(diary.items);
+}
+
+function renderRings(s){
+  const consumed = Math.round(s.consumed.kcal);
+  const overTarget = s.remaining != null && s.remaining < 0;
+  // The fill IS remaining (not consumed) - it should match what the big
+  // center number says, which is the more intuitive reading. Starts full
+  // and depletes as you eat; fully filled in the "over" color once you've
+  // spent past target, since there's nothing left to show as a partial arc.
+  const pct = overTarget ? 1 : (s.target ? Math.max(0, s.remaining) / s.target : 0);
+  const color = overTarget ? 'var(--ring-remain-over)' : 'var(--ring-consumed)';
+  const centerNum = s.target != null
+    ? (s.remaining != null ? Math.round(s.remaining) : '—')
+    : consumed;
+  const centerLabel = s.target != null ? 'Remaining' : 'Consumed';
+
+  $('#rings').innerHTML = `
+    <div class="ring-single">${ringSvg(pct, color, 'var(--ring-track)')}
+      <div class="ring-center">
+        <div class="ring-big">${centerNum}</div>
+        <div class="ring-biglabel">${centerLabel}</div>
+      </div>
+    </div>
+    <div class="ring-detail">
+      <b>${consumed}</b> consumed${s.target!=null?` of <b>${Math.round(s.target)}</b> target`:' — set your profile for a target'}<br>
+      ${s.expenditure!=null?`Expenditure <b>${Math.round(s.expenditure)}</b> kcal${s.bmr?` (BMR ${Math.round(s.bmr)})`:''}`:''}
+    </div>`;
+}
+
+/* Two groups, not one flat list: protein/fiber are things to get ENOUGH of,
+   the rest are things to keep in check - a thin dashed line separates them
+   rather than a label, so the priority reads at a glance. */
+/* Fiber/carbs/fat/sodium/sugar are flat RDA-style reference points, same
+   for everyone. Protein is the one macro that's genuinely personal (it
+   scales with your body and your goal - see the Settings "Protein goal"
+   picker), so its ref comes from the server each render instead of being
+   a constant here. */
+const MACRO_GROUP2 = [
+  ['carbs_g','Carbs','g',250], ['fat_g','Fat','g',70],
+  ['sodium_mg','Sodium','mg',2300], ['sugar_g','Sugar','g',50],
+];
+function renderMacros(c, proteinTarget){
+  const groups = [
+    [['protein_g','Protein','g',proteinTarget||150], ['fiber_g','Fiber','g',30]],
+    MACRO_GROUP2,
+  ];
+  $('#macros').innerHTML = groups.map((group, gi) =>
+    (gi > 0 ? '<div class="macro-sep"></div>' : '') +
+    group.map(([k,label,unit,ref]) => {
+      const v = c[k]||0, pct = Math.min(1, v/ref);
+      return `<div class="macro-row"><div class="macro-name">${label}</div>
+        <div class="macro-bar"><i style="width:${(pct*100).toFixed(0)}%"></i></div>
+        <div class="macro-val">${Math.round(v)} ${unit}</div></div>`;
+    }).join('')
+  ).join('');
+}
+
+let expandedMeals = new Set(MEALS);
+function renderMeals(items){
+  $('#meals').innerHTML = MEALS.map(meal => {
+    const rows = items.filter(it => it.meal === meal);
+    const kcal = rows.reduce((s,r)=>s+r.kcal, 0);
+    const open = expandedMeals.has(meal);
+    const body = rows.length ? rows.map(r => `
+      <div class="item-row" onclick="editEntry(${JSON.stringify(r).replace(/"/g,'&quot;')})">
+        <div class="item-name"><div class="item-title">${esc(r.item_name)}</div>
+          <div class="item-amt">${r.qty} ${r.unit==='gram'?'g':(r.qty==1?'serving':'servings')}</div></div>
+        <div class="item-kcal">${Math.round(r.kcal)}</div>
+      </div>`).join('') : '<div class="empty">Nothing logged yet</div>';
+    return `<div class="meal">
+      <div class="meal-head" onclick="toggleMeal('${meal}')">
+        <div class="name">${MEAL_LABEL[meal]}</div>
+        <div class="kcal">${Math.round(kcal)} kcal</div>
+        <span class="meal-chevron">${open ? '&#9662;' : '&#9656;'}</span>
+        <button class="meal-add" onclick="event.stopPropagation();openAddSheet('${meal}')">+</button>
+      </div>
+      ${open ? `<div class="meal-body">${body}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+function toggleMeal(meal){
+  if (expandedMeals.has(meal)) expandedMeals.delete(meal); else expandedMeals.add(meal);
+  loadDiary();
+}
+
+function editEntry(row){
+  openModal('Edit entry', `
+    <div class="msg"><b>${esc(row.item_name)}</b></div>
+    <div class="form-row"><label>Meal</label>
+      <select id="edit-meal">${MEALS.map(m=>`<option value="${m}" ${m===row.meal?'selected':''}>${MEAL_LABEL[m]}</option>`).join('')}</select></div>
+    <div class="form-row"><label>Amount (${row.unit==='gram'?'grams':'servings'})</label>
+      <input type="number" id="edit-qty" value="${row.qty}" step="${row.unit==='gram'?5:0.5}" min="0"></div>
+    <button class="btn primary block" onclick="saveEntryEdit(${JSON.stringify(row).replace(/"/g,'&quot;')})" style="margin-bottom:8px">Save</button>
+    <button class="btn danger block" onclick="deleteEntry('${row.id}')">Delete</button>
+  `);
+}
+async function saveEntryEdit(row){
+  const meal = $('#edit-meal').value, qty = parseFloat($('#edit-qty').value);
+  try {
+    await post('/diary/delete', {id: row.id});
+    await post('/diary', {id: crypto.randomUUID?crypto.randomUUID():String(Math.random()),
+      day: row.day, meal, item_id: row.item_id, qty, unit: row.unit});
+    closeModal(); loadDiary(); toast('Updated');
+  } catch(e) { toast(e.message); }
+}
+async function deleteEntry(id){
+  try { await post('/diary/delete', {id}); closeModal(); loadDiary(); }
+  catch(e) { toast(e.message); }
+}
+
+/* ============================================================ modal helpers */
+function openModal(title, html){
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = html;
+  $('#modal-overlay').classList.remove('hidden');
+}
+function closeModal(){ $('#modal-overlay').classList.add('hidden'); }
+
+/* ============================================================ + sheet
+   Two entry points share one set of AI/scan/import flows: the bottom + logs
+   what you add (mode 'log'), the Library's + only wants it in the shared
+   library (mode 'library' - a scan doesn't jump to the amount editor, and
+   reviewItem's two save buttons swap which one is emphasized). Describe
+   Food/Photo Log/Import URL already end at reviewItem either way, which
+   always offers both "log it now" and "just save" regardless of mode. */
+let _addSheetMode = 'log';
+function openAddSheet(defaultMeal){
+  _addSheetMode = 'log';
+  window._addMeal = defaultMeal || guessMeal();
+  openModal('Add to '+MEAL_LABEL[window._addMeal], `
+    <div class="action-grid">
+      <div class="action-tile" onclick="closeModal();$('#scan-file').click();"><span class="ic">&#128241;</span><span class="lbl">Scan Barcode</span></div>
+      <div class="action-tile" onclick="openAiText()"><span class="ic">&#128221;</span><span class="lbl">Describe Food</span></div>
+      <div class="action-tile" onclick="openPhotoLog()"><span class="ic">&#128248;</span><span class="lbl">Photo Log</span></div>
+      <div class="action-tile" onclick="openImportUrl()"><span class="ic">&#128279;</span><span class="lbl">Import Recipe URL</span></div>
+      <div class="action-tile" onclick="showView('foods');closeModal();"><span class="ic">&#128218;</span><span class="lbl">From Library</span></div>
+    </div>`);
+}
+function openLibraryAddSheet(){
+  _addSheetMode = 'library';
+  openModal('Add to Library', `
+    <div class="action-grid">
+      <div class="action-tile" onclick="closeModal();$('#scan-file').click();"><span class="ic">&#128241;</span><span class="lbl">Scan Barcode</span></div>
+      <div class="action-tile" onclick="openAiText()"><span class="ic">&#128221;</span><span class="lbl">Describe Food</span></div>
+      <div class="action-tile" onclick="openPhotoLog()"><span class="ic">&#128248;</span><span class="lbl">Photo Log</span></div>
+      <div class="action-tile" onclick="openImportUrl()"><span class="ic">&#128279;</span><span class="lbl">Import Recipe URL</span></div>
+      <div class="action-tile" onclick="closeModal();reviewItem({})"><span class="ic">&#9999;&#65039;</span><span class="lbl">Manual Entry</span></div>
+    </div>`);
+}
+function guessMeal(){
+  const h = new Date().getHours();
+  if (h < 11) return 'breakfast'; if (h < 16) return 'lunch';
+  if (h < 21) return 'dinner'; return 'snacks';
+}
+
+/* Food-vs-recipe creation used to be two separate forms; both are now just
+   reviewItem() below, since a "food" turned out to be nothing more than a
+   one-serving item - see the unified `items` table docstring in
+   track_backend.py. */
+
+/* ---- Scan barcode: tapping the tile goes straight to the camera - no
+   intermediate modal, no manual-entry fallback (rare enough in practice
+   that Photo Log/Describe Food cover the "can't read it" case better than
+   a barcode number would). Same still-photo + local ZXing decode mechanism
+   as Photo Log: live continuous scanning (getUserMedia) needs a secure
+   context - HTTPS or localhost - and this dock is deliberately plain HTTP
+   for the old iPad's sake. A file input with capture="environment" opens
+   the OS camera app directly and hands back a finished photo, which is NOT
+   gated by secure context, so it works here with no infrastructure changes.
+   The input itself lives in the static markup (not inside a modal) so it
+   survives the add-sheet closing right before it's clicked. */
+$('#scan-file').addEventListener('change', async () => {
+  const file = $('#scan-file').files[0];
+  $('#scan-file').value = '';
+  if (!file) return;
+  toast('Reading barcode…');
+  const url = URL.createObjectURL(file);
+  try {
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+      [ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]);
+    const reader = new ZXing.BrowserMultiFormatReader(hints);
+    const result = await reader.decodeFromImageUrl(url);
+    lookupBarcode(result.getText());
+  } catch(e) {
+    toast("Couldn't read a barcode in that photo — try Photo Log or Describe Food instead.");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+});
+async function lookupBarcode(code){
+  code = (code||'').trim();
+  if (!code) return;
+  openModal('Scan Barcode', '<div class="msg">Looking up…</div>');
+  try {
+    const it = await api('/items/barcode?code='+encodeURIComponent(code));
+    if (it.error) {
+      openModal('Not found', `<div class="msg">No product found for that barcode.</div>
+        <button class="btn primary block" onclick='reviewItem(${JSON.stringify({barcode:code}).replace(/'/g,"&#39;")})'>Create custom food</button>`);
+      return;
+    }
+    if (_addSheetMode === 'library') {
+      closeModal();
+      toast('Added ' + it.name + ' to your library');
+      if (currentView === 'foods') loadFoods();
+    } else {
+      logItemNow(it);
+    }
+  } catch(e) { toast(e.message); }
+}
+
+/* ---- AI: describe a recipe */
+function openAiText(){
+  window._aiPhotoFile = null;
+  openModal('Describe Food', `
+    <textarea id="ai-text" class="composer" rows="5" placeholder="What did you eat? Anything from a cup of tea with honey to a full recipe — e.g. &quot;chili with 2 lb ground beef, 2 cans black beans, a can of diced tomatoes, onion, spices, makes about 6 servings&quot; or just &quot;a medium banana&quot;."></textarea>
+    <div style="margin:10px 0">
+      <button class="btn ghost" onclick="$('#ai-photo-file').click()">&#128248; Attach photo (optional)</button>
+      <input type="file" id="ai-photo-file" accept="image/*" style="display:none">
+    </div>
+    <div id="ai-preview"></div>
+    <div id="ai-msg" class="msg"></div>
+    <button class="btn primary block" onclick="submitAiText()">Estimate nutrition</button>`);
+  setTimeout(()=>$('#ai-text').focus(), 80);
+  $('#ai-photo-file').addEventListener('change', () => {
+    const file = $('#ai-photo-file').files[0];
+    if (!file) return;
+    window._aiPhotoFile = file;
+    $('#ai-preview').innerHTML = `<div style="position:relative;display:inline-block;margin-bottom:10px">
+      <img src="${URL.createObjectURL(file)}" style="max-height:100px;border-radius:10px;display:block">
+      <button class="pill-clear" style="position:absolute;top:-6px;right:-6px" onclick="window._aiPhotoFile=null;$('#ai-preview').innerHTML='';$('#ai-photo-file').value='';">&#10005;</button>
+    </div>`;
+  });
+}
+async function submitAiText(){
+  const text = $('#ai-text').value.trim();
+  const file = window._aiPhotoFile;
+  if (!text && !file) return;
+  $('#ai-msg').textContent = 'Thinking…'; $('#ai-msg').className='msg';
+  try {
+    const body = {text};
+    if (file) {
+      body.image_b64 = await fileToBase64(file);
+      body.media_type = file.type || 'image/jpeg';
+    }
+    const it = await post('/items/ai_text', body);
+    handleAiItemResult(it);
+  } catch(e) { $('#ai-msg').textContent = e.message; $('#ai-msg').className='msg err'; }
+}
+/* Claude may recognize this as something already in the library (just a
+   different amount) instead of a new food - skip creating a near-duplicate
+   and jump straight to logging the estimated amount against the existing
+   item, same as a repeated barcode scan never duplicates either. */
+function handleAiItemResult(it){
+  if (it.matched_existing) {
+    closeModal();
+    toast('Found "'+it.name+'" already in your library');
+    openAmountEditor({item_id:it.id, name:it.name, hasGrams:!!it.total_grams,
+      totalGrams:it.total_grams, servings:it.servings, presetGramQty:it.log_grams});
+  } else {
+    reviewItem(it);
+  }
+}
+
+/* ---- AI: photo log */
+function openPhotoLog(){
+  openModal('Photo Log', `
+    <div class="msg">Take a photo of a nutrition label or a food item, or upload one — a screenshot works too.</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn ghost block" onclick="$('#photo-file-camera').click()">Take Photo</button>
+      <button class="btn ghost block" onclick="$('#photo-file-library').click()">Choose Photo</button>
+    </div>
+    <input type="file" id="photo-file-camera" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="photo-file-library" accept="image/*" style="display:none">
+    <div id="photo-preview" style="margin:10px 0"></div>
+    <div id="photo-msg" class="msg"></div>
+    <button class="btn primary block" id="photo-submit" disabled onclick="submitPhotoLog()">Estimate nutrition</button>`);
+  const onPick = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    window._photoFile = file;
+    $('#photo-preview').innerHTML = `<img src="${URL.createObjectURL(file)}" style="max-width:100%;border-radius:10px">`;
+    $('#photo-submit').disabled = false;
+  };
+  $('#photo-file-camera').addEventListener('change', onPick);
+  $('#photo-file-library').addEventListener('change', onPick);
+}
+function fileToBase64(file){
+  return new Promise((resolve,reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+async function submitPhotoLog(){
+  const file = window._photoFile;
+  if (!file) return;
+  $('#photo-msg').textContent = 'Analyzing photo…'; $('#photo-msg').className='msg';
+  try {
+    const b64 = await fileToBase64(file);
+    const it = await post('/items/ai_photo', {image_b64:b64, media_type:file.type||'image/jpeg'});
+    handleAiItemResult(it);
+  } catch(e) { $('#photo-msg').textContent = e.message; $('#photo-msg').className='msg err'; }
+}
+
+/* ---- Import recipe by URL */
+function openImportUrl(){
+  openModal('Import Recipe', `
+    <div class="pill-field">
+      <span class="pill-icon">&#128279;</span>
+      <input type="url" id="import-url" placeholder="https://example.com/some-recipe" inputmode="url" oninput="$('#import-url-clear').hidden = !this.value">
+      <button class="pill-clear" id="import-url-clear" onclick="$('#import-url').value='';this.hidden=true;$('#import-url').focus();" hidden>&#10005;</button>
+    </div>
+    <div id="import-msg" class="msg"></div>
+    <button class="btn primary block" onclick="submitImportUrl()">Import</button>`);
+  setTimeout(()=>$('#import-url').focus(), 80);
+}
+async function submitImportUrl(){
+  const url = $('#import-url').value.trim();
+  if (!url) return;
+  $('#import-msg').textContent = 'Fetching…'; $('#import-msg').className='msg';
+  try {
+    const it = await post('/items/import_url', {url});
+    if (it.warning) toast(it.warning);
+    reviewItem(it);
+  } catch(e) { $('#import-msg').textContent = e.message; $('#import-msg').className='msg err'; }
+}
+
+/* ---- shared: review + edit a single item. Used for EVERYTHING now - a
+   scanned food and a 6-serving chili are the same shape (see the `items`
+   table docstring in track_backend.py): right after AI text/photo/import
+   (where e.g. Photo Log needs a real name), a brand-new manual item, or
+   later from the library's Edit button. Always saves before proceeding, so
+   "Log it now" never logs stale/unreviewed numbers. */
+function reviewItem(it){
+  it = it || {};
+  const libraryMode = _addSheetMode === 'library';
+  const saveBtn = `<button class="btn ${libraryMode?'primary':'ghost'} block" style="${libraryMode?'margin-bottom:8px':''}" onclick='reviewItemSubmit(${JSON.stringify(it).replace(/'/g,"&#39;")}, false)'>Just save to library</button>`;
+  const logBtn = `<button class="btn ${libraryMode?'ghost':'primary'} block" style="${libraryMode?'':'margin-bottom:8px'}" onclick='reviewItemSubmit(${JSON.stringify(it).replace(/'/g,"&#39;")}, true)'>Save &amp; log it now</button>`;
+  openModal(it.id ? 'Review & Save' : 'New Item', `
+    <div class="form-row"><label>Name</label><input id="rv-name" value="${esc(it.name||'')}" placeholder="Give it a name"></div>
+    <div class="form-2col">
+      <div class="form-row"><label>Brand (optional)</label><input id="rv-brand" value="${esc(it.brand||'')}"></div>
+      <div class="form-row"><label>Serving (optional, e.g. "1 bar")</label><input id="rv-servdesc" value="${esc(it.serving_desc||'')}"></div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row"><label>Servings</label><input id="rv-servings" type="number" value="${it.servings||1}" step="0.5"></div>
+      <div class="form-row"><label>Total grams (optional)</label><input id="rv-grams" type="number" value="${it.total_grams||''}"></div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row"><label>Calories (whole amount)</label><input id="rv-kcal" type="number" value="${it.kcal||0}"></div>
+      <div class="form-row"><label>Protein (g)</label><input id="rv-protein" type="number" value="${it.protein_g||0}"></div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row"><label>Carbs (g)</label><input id="rv-carbs" type="number" value="${it.carbs_g||0}"></div>
+      <div class="form-row"><label>Fat (g)</label><input id="rv-fat" type="number" value="${it.fat_g||0}"></div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row"><label>Fiber (g)</label><input id="rv-fiber" type="number" value="${it.fiber_g||0}"></div>
+      <div class="form-row"><label>Sodium (mg)</label><input id="rv-sodium" type="number" value="${it.sodium_mg||0}"></div>
+    </div>
+    <div class="form-row"><label>Sugar (g)</label><input id="rv-sugar" type="number" value="${it.sugar_g||0}"></div>
+    <div class="form-row"><label>Ingredients <span style="text-transform:none;font-weight:400">(one per line, optional — for reference only, not used in the math)</span></label>
+      <textarea id="rv-ingredients" rows="4">${esc((it.ingredients||[]).join('\n'))}</textarea></div>
+    <div id="rv-msg" class="msg"></div>
+    ${libraryMode ? saveBtn + logBtn : logBtn + saveBtn}
+  `);
+}
+async function reviewItemSubmit(it, thenLog){
+  const body = {
+    id: it.id || null, barcode: it.barcode || null,
+    name: $('#rv-name').value.trim() || 'Untitled',
+    brand: $('#rv-brand').value.trim() || null,
+    serving_desc: $('#rv-servdesc').value.trim() || null,
+    servings: parseFloat($('#rv-servings').value) || 1,
+    total_grams: $('#rv-grams').value ? parseFloat($('#rv-grams').value) : null,
+    kcal: parseFloat($('#rv-kcal').value) || 0, protein_g: parseFloat($('#rv-protein').value) || 0,
+    carbs_g: parseFloat($('#rv-carbs').value) || 0, fat_g: parseFloat($('#rv-fat').value) || 0,
+    fiber_g: parseFloat($('#rv-fiber').value) || 0, sodium_mg: parseFloat($('#rv-sodium').value) || 0,
+    sugar_g: parseFloat($('#rv-sugar').value) || 0,
+    ingredients: $('#rv-ingredients').value.split('\n').map(s=>s.trim()).filter(Boolean),
+  };
+  try {
+    const saved = await post('/items', body);
+    if (thenLog) { logItemNow(saved); }
+    else { closeModal(); showView('foods'); toast('Saved'); }
+  } catch(e) { $('#rv-msg').textContent = e.message; $('#rv-msg').className = 'msg err'; }
+}
+function logItemNow(it){
+  openAmountEditor({item_id:it.id, name:it.name,
+    hasGrams: !!it.total_grams, totalGrams:it.total_grams, servings:it.servings});
+}
+
+/* ============================================================ amount editor */
+function openAmountEditor(opt){
+  const meal = window._addMeal || guessMeal();
+  const gramDefault = Math.round((opt.totalGrams||0) / (opt.servings||1)) || 100;
+  const startUnit = opt.presetGramQty ? 'gram' : 'serving';
+  const startQty = opt.presetGramQty || 1;
+  openModal('Log '+opt.name, `
+    <div class="form-row"><label>Date</label>
+      <input type="date" id="amt-day" value="${currentDay}"></div>
+    <div class="form-row"><label>Meal</label>
+      <select id="amt-meal">${MEALS.map(m=>`<option value="${m}" ${m===meal?'selected':''}>${MEAL_LABEL[m]}</option>`).join('')}</select></div>
+    <div class="seg" id="amt-unit-seg">
+      <button class="${startUnit==='serving'?'on':''}" data-unit="serving" onclick="setAmtUnit('serving', ${gramDefault})">Servings</button>
+      <button class="${startUnit==='gram'?'on':''}" data-unit="gram" ${opt.hasGrams?'':'disabled'} onclick="setAmtUnit('gram', ${gramDefault})">Grams</button>
+    </div>
+    <div class="form-row"><label id="amt-qty-label">${startUnit==='gram'?'Grams':'Servings'}</label>
+      <input type="number" id="amt-qty" value="${startQty}" step="${startUnit==='gram'?5:0.5}" min="0"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0">
+      <input type="checkbox" id="amt-household"> Log for both of us
+    </label>
+    <div id="amt-msg" class="msg"></div>
+    <button class="btn primary block" onclick='submitAmount(${JSON.stringify(opt).replace(/'/g,"&#39;")}, ${gramDefault})'>Log it</button>
+  `);
+  window._amtUnit = startUnit;
+}
+function setAmtUnit(u, gramDefault){
+  window._amtUnit = u;
+  document.querySelectorAll('#amt-unit-seg button').forEach(b=>b.classList.toggle('on', b.dataset.unit===u));
+  $('#amt-qty-label').textContent = u === 'gram' ? 'Grams' : 'Servings';
+  $('#amt-qty').value = u === 'gram' ? gramDefault : 1;
+  $('#amt-qty').step = u === 'gram' ? 5 : 0.5;
+}
+async function submitAmount(opt, gramDefault){
+  const day = $('#amt-day').value || currentDay;
+  const meal = $('#amt-meal').value;
+  const unit = window._amtUnit;
+  let qty = parseFloat($('#amt-qty').value);
+  if (!qty) qty = unit==='gram' ? gramDefault : 1;
+  const household = $('#amt-household').checked;
+  const body = {day, meal, item_id: opt.item_id,
+    qty, unit, id: (crypto.randomUUID?crypto.randomUUID():String(Math.random()))};
+  try {
+    await post(household ? '/diary/household' : '/diary', body);
+    closeModal();
+    if (day !== currentDay) { currentDay = day; }
+    showView('diary');
+    toast(day === todayStr() ? 'Logged' : 'Logged to ' + fmtDay(day));
+  } catch(e) { $('#amt-msg').textContent = e.message; $('#amt-msg').className='msg err'; }
+}
+/* ============================================================ library
+   Used to be split into Recipes/Foods/Meals, then Foods/Meals - but a food
+   turned out to be nothing more than a one-serving item with no ingredient
+   list, so the split never earned its keep (a single scanned Snickers bar
+   and a 6-serving chili were already the same shape once Describe Food
+   started handling "just an apple" too). Now it's one flat, searchable
+   library - see the `items` table docstring in track_backend.py. */
+let _itemsCache = [];
+function loadFoods(){
+  _addSheetMode = 'library';
+  $('#foods-body').innerHTML = `
+    <div class="pill-field">
+      <span class="pill-icon">&#128269;</span>
+      <input type="text" id="items-q" placeholder="Search your library…" oninput="renderItemsList()">
+      <button class="pill-clear" id="items-q-clear" onclick="clearItemsSearch()" hidden>&#10005;</button>
+    </div>
+    <button class="fab-new" style="margin:10px 0" onclick="openLibraryAddSheet()">+ Add to library</button>
+    <div id="items-list"></div>`;
+  api(withUser('/items')).then(d => { _itemsCache = d.items; renderItemsList(); });
+}
+function clearItemsSearch(){
+  $('#items-q').value = '';
+  renderItemsList();
+  $('#items-q').focus();
+}
+function _amountLabel(it){
+  if (it.serving_desc) return esc(it.serving_desc);
+  const servings = it.servings || 1;
+  return servings + (servings == 1 ? ' serving' : ' servings')
+    + (it.total_grams ? ', ' + Math.round(it.total_grams) + ' g' : '');
+}
+function renderItemsList(){
+  const raw = $('#items-q').value || '';
+  const q = raw.trim().toLowerCase();
+  $('#items-q-clear').hidden = !raw;
+  const items = q ? _itemsCache.filter(it =>
+    it.name.toLowerCase().includes(q) || (it.brand||'').toLowerCase().includes(q)) : _itemsCache;
+  $('#items-list').innerHTML = items.length ? items.map(it => `
+    <div class="list-card"><div class="list-row" onclick='viewItem("${it.id}")'>
+      <div class="list-thumb ${it.image?'':'list-emoji'}" style="${it.image?`background-image:url('/api/track/image?id=${it.id}')`:''}">${it.image?'':esc(it.emoji||'\u{1F37D}')}</div>
+      <div class="item-name"><div class="item-title">${esc(it.name)}</div>
+        <div class="list-sub">${esc(it.brand||'')} ${_amountLabel(it)} · ${Math.round(it.kcal)} kcal</div></div>
+    </div></div>`).join('') : `<div class="empty">${q?'No matches':'Nothing yet — use the + button to add something'}</div>`;
+}
+function viewItem(id){
+  const it = _itemsCache.find(x => x.id === id);
+  if (!it) return;
+  const editable = it.source !== 'off';
+  openModal(it.name, `
+    ${it.image?`<img src="/api/track/image?id=${it.id}" style="width:100%;border-radius:12px;margin-bottom:10px">`:''}
+    <div class="msg">${_amountLabel(it)}: ${Math.round(it.kcal)} kcal · ${Math.round(it.protein_g)}g protein ·
+      ${Math.round(it.carbs_g)}g carbs · ${Math.round(it.fat_g)}g fat · ${Math.round(it.fiber_g)}g fiber ·
+      ${Math.round(it.sodium_mg)}mg sodium · ${Math.round(it.sugar_g)}g sugar</div>
+    ${(it.ingredients||[]).length ? `<div class="ingredient-list">${it.ingredients.map(esc).join('<br>')}</div>` : ''}
+    <button class="btn primary block" style="margin-bottom:8px" onclick='logItemNow(${JSON.stringify(it).replace(/'/g,"&#39;")})'>Log it</button>
+    ${editable ? `<button class="btn ghost block" style="margin-bottom:8px" onclick='reviewItem(${JSON.stringify(it).replace(/'/g,"&#39;")})'>Edit</button>`
+      : `<div class="msg" style="text-align:center">From Open Food Facts — not editable</div>`}
+    <button class="btn danger block" onclick="deleteItem('${it.id}')">Delete</button>
+  `);
+}
+async function deleteItem(id){
+  if (!confirm('Delete this item for both of you?')) return;
+  try { await post('/items/delete', {id}); closeModal(); loadFoods(); }
+  catch(e) { toast(e.message); }
+}
+
+/* ============================================================ settings */
+/* 3,500 kcal ≈ 1 lb of fat, the standard rule-of-thumb conversion. This part
+   is a physical constant, same for everyone. What genuinely varies by person
+   is whether the RESULTING target is a sane fraction of their own
+   expenditure - see updateCaution() below. */
+const PACE_PRESETS = [0, 0.25, 0.5, 0.75, 1, 1.5];
+const paceToKcal = lbs => Math.round(lbs * 500);
+function onPaceChange(){
+  $('#st-deficit').value = paceToKcal(parseFloat($('#st-pace').value));
+  updateCaution();
+}
+/* Protein is the one macro worth personalizing (see the macro-strip
+   comment) - g/kg-bodyweight presets are well-established in sports
+   nutrition: ~0.8 g/kg covers general health, up toward 1.6-2.2 g/kg for
+   active weight loss (preserve muscle in a deficit) or muscle-building
+   strength training, per ISSN position-stand-style guidance. 1.8 g/kg
+   lands solidly in that range without needing to split hairs. */
+const PROTEIN_PRESETS = [
+  {label:'General health', mult:0.8},
+  {label:'Active / moderate exercise', mult:1.2},
+  {label:'Weight loss, preserve muscle', mult:1.6},
+  {label:'Build muscle / strength training', mult:1.8},
+];
+function onProteinPaceChange(){
+  const mult = parseFloat($('#st-protein-pace').value);
+  const wKg = $('#st-weight').value ? lbToKg(parseFloat($('#st-weight').value)) : null;
+  if (wKg) $('#st-protein').value = Math.round(mult * wKg);
+}
+/* General, widely-cited guidelines (not medical advice) - flags for
+   awareness, never blocks saving. Floors: ~1200 kcal/day (f) / ~1500 (m).
+   Deficits beyond ~25% of expenditure are commonly considered aggressive. */
+function updateCaution(){
+  const exp = window._settingsExpenditure, sex = $('#st-sex').value;
+  const deficit = parseFloat($('#st-deficit').value) || 0;
+  const el = $('#st-caution');
+  if (!el || !exp) { return; }
+  const target = exp - deficit;
+  const floor = sex === 'm' ? 1500 : 1200;
+  if (target < floor) {
+    el.textContent = `That target (${Math.round(target)} kcal) is below the commonly-cited ${floor} kcal/day floor for ${sex==='m'?'men':'women'} — consider a smaller deficit, or check with a doctor.`;
+    el.className = 'msg err';
+  } else if (deficit > exp * 0.25) {
+    el.textContent = `That deficit is over 25% of your expenditure — a commonly-cited upper bound for a sustainable pace.`;
+    el.className = 'msg err';
+  } else {
+    el.textContent = ''; el.className = 'msg';
+  }
+}
+async function loadSettings(){
+  const t = await api(withUser('/targets'));
+  const u = t.user, p = t.profile || {};
+  const wLb = u.weight_kg ? Math.round(kgToLb(u.weight_kg)) : '';
+  const {ft, inch} = u.height_cm ? cmToFtIn(u.height_cm) : {ft:'', inch:''};
+  const deficit = p.goal_deficit || 0;
+  window._settingsExpenditure = t.expenditure;
+  let paceValue = '0';
+  for (const lbs of PACE_PRESETS) { if (Math.abs(paceToKcal(lbs) - deficit) < 3) { paceValue = String(lbs); break; } }
+  const proteinG = Math.round(t.protein_target || 0);
+  let proteinMult = PROTEIN_PRESETS[1].mult;
+  if (u.weight_kg) {
+    for (const pr of PROTEIN_PRESETS) { if (Math.abs(pr.mult*u.weight_kg - proteinG) < 3) { proteinMult = pr.mult; break; } }
+  }
+  $('#settings-body').innerHTML = `
+    <div class="form-2col">
+      <div class="form-row"><label>Sex</label>
+        <select id="st-sex" onchange="updateCaution()"><option value="f" ${u.sex==='f'?'selected':''}>Female</option><option value="m" ${u.sex==='m'?'selected':''}>Male</option></select></div>
+      <div class="form-row"><label>Age</label><input type="number" id="st-age" value="${u.age||''}"></div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row"><label>Height (ft)</label><input type="number" id="st-hft" value="${ft}"></div>
+      <div class="form-row"><label>Height (in)</label><input type="number" id="st-hin" value="${inch}"></div>
+    </div>
+    <div class="form-row"><label>Weight (lb)</label><input type="number" id="st-weight" value="${wLb}"></div>
+    <div class="form-row"><label>Activity level</label>
+      <select id="st-activity">
+        <option value="1.2" ${p.activity_mult==1.2?'selected':''}>Sedentary (little exercise)</option>
+        <option value="1.375" ${!p.activity_mult||p.activity_mult==1.375?'selected':''}>Light (1-3 days/week)</option>
+        <option value="1.55" ${p.activity_mult==1.55?'selected':''}>Moderate (3-5 days/week)</option>
+        <option value="1.725" ${p.activity_mult==1.725?'selected':''}>Active (6-7 days/week)</option>
+        <option value="1.9" ${p.activity_mult==1.9?'selected':''}>Very active (physical job/2x day)</option>
+      </select></div>
+    <div class="form-row"><label>Goal pace</label>
+      <select id="st-pace" onchange="onPaceChange()">
+        ${PACE_PRESETS.map(lbs => `<option value="${lbs}" ${String(lbs)===paceValue?'selected':''}>${
+          lbs===0?'Maintain weight':'Lose about '+lbs+' lb/week'} (${lbs===0?'0':'-'+paceToKcal(lbs)} kcal/day)</option>`).join('')}
+      </select></div>
+    <div class="form-row"><label>Daily deficit (kcal, optional override)</label>
+      <input type="number" id="st-deficit" value="${deficit}" oninput="updateCaution()"></div>
+    <div class="form-row"><label>Override expenditure (kcal, optional)</label>
+      <input type="number" id="st-override" value="${p.expenditure_override||''}"></div>
+    <div id="st-caution" class="msg"></div>
+    <div class="form-row"><label>Protein goal</label>
+      <select id="st-protein-pace" onchange="onProteinPaceChange()">
+        ${PROTEIN_PRESETS.map(pr => `<option value="${pr.mult}" ${pr.mult===proteinMult?'selected':''}>${pr.label} (${pr.mult} g/kg)</option>`).join('')}
+      </select></div>
+    <div class="form-row"><label>Daily protein target (g, optional override)</label>
+      <input type="number" id="st-protein" value="${proteinG}"></div>
+    <div class="readout">BMR: <b>${t.bmr?Math.round(t.bmr):'—'}</b> kcal ·
+      Expenditure: <b>${t.expenditure?Math.round(t.expenditure):'—'}</b> kcal ·
+      Daily target: <b>${t.target?Math.round(t.target):'—'}</b> kcal<br>
+      Protein target: <b>${proteinG}</b> g${t.target?` (≈${Math.round(proteinG*4/t.target*100)}% of calories)`:''}</div>
+    <button class="btn primary block" style="margin-bottom:10px" onclick="saveSettings()">Save</button>
+    <button class="btn ghost block" onclick="switchUser()">Switch user</button>
+  `;
+  updateCaution();
+}
+async function saveSettings(){
+  try {
+    await post('/targets', {
+      sex: $('#st-sex').value, age: parseInt($('#st-age').value)||null,
+      height_cm: ftInToCm(parseInt($('#st-hft').value)||0, parseInt($('#st-hin').value)||0) || null,
+      weight_kg: $('#st-weight').value ? lbToKg(parseFloat($('#st-weight').value)) : null,
+      activity_mult: parseFloat($('#st-activity').value),
+      goal_deficit: parseFloat($('#st-deficit').value)||0,
+      expenditure_override: $('#st-override').value ? parseFloat($('#st-override').value) : null,
+      protein_target_g: $('#st-protein').value ? parseFloat($('#st-protein').value) : null,
+    });
+    toast('Saved'); loadSettings();
+  } catch(e) { toast(e.message); }
+}
+
+boot();
+</script>
+</body>
+</html>
