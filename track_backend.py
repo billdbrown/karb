@@ -680,12 +680,14 @@ FDC_NUTRIENTS = {"208": "kcal", "203": "protein_g", "205": "carbs_g",
                  "204": "fat_g", "291": "fiber_g", "307": "sodium_mg",
                  "269": "sugar_g"}
 
-# Generic foods first, brands last. Someone typing "chicken thigh" wants the
-# food, not a frozen dinner whose label mentions it - and Branded is 433k rows
-# against ~13k for everything else, so unranked it would bury them. Survey
-# (FNDDS) leads because its rows are foods AS EATEN (roasted, skin removed),
-# which is what a diary actually logs.
-FDC_TYPE_RANK = {"Survey (FNDDS)": 0, "Foundation": 1, "SR Legacy": 2, "Branded": 3}
+# A NUDGE, not a sort. Branded is 433k rows against ~13k for the other three,
+# so "chicken thigh" needs generic food lifted above the frozen dinners that
+# merely mention it. But an earlier version sorted by type outright, and that
+# was worse than doing nothing: USDA returned "GREEK YOGURT BAR" first for
+# "greek yogurt bar" and the sort demoted it to sixth, behind plain yogurt.
+# Relevance is the primary signal now; this only shifts a branded hit a few
+# places down, so an exact branded match still lands near the top.
+FDC_BRANDED_PENALTY = 3
 
 
 def fdc_key():
@@ -806,21 +808,69 @@ def _fdc_name(desc):
 
 
 def fdc_search(query, limit=25):
+    """Two passes, because neither alone is right.
+
+    `requireAllWords` makes multi-word queries behave the way people expect:
+    "greek yogurt bar" returns bars rather than every Greek yogurt, and
+    "chicken thigh" stops matching anything with chicken in it somewhere.
+    Without it USDA's relevance is loose enough to mislead - it answered
+    "yasso chocolate fudge" with "Cookie, chocolate or fudge".
+
+    But it matches the description only, never the brand, so that same query
+    returns nothing at all under it while the loose search does find the
+    product. Hence precise first, loose only when precise found nothing.
+    """
     q = (query or "").strip()
     if len(q) < 2:
         raise ValueError("search needs at least two characters")
-    d = _fdc_get("/foods/search", {"query": q, "pageSize": max(1, min(int(limit), 50))})
+    size = max(1, min(int(limit), 50))
+
+    def hit(text, precise=True):
+        params = {"query": text, "pageSize": size}
+        if precise:
+            params["requireAllWords"] = "true"
+        return _fdc_get("/foods/search", params)
+
+    words = q.split()
+    extra = []
+    d = hit(q)
+    # Narrow to broad. "yasso chocolate fudge" matches nothing precisely, since
+    # requireAllWords never looks at the brand - but "yasso" alone matches 73
+    # products. Drop trailing words until something lands, and remember what was
+    # dropped: those are the terms that describe WHICH product, and they get
+    # scored against the results below. Brand-first is the order people type.
+    i = len(words)
+    while not (d.get("foods") or []) and i > 1:
+        i -= 1
+        extra = [w.lower() for w in words[i:]]
+        d = hit(" ".join(words[:i]))
+    if not (d.get("foods") or []):
+        extra = []
+        d = hit(q, precise=False)     # last resort: USDA's loose matching
     out = []
-    for f in d.get("foods") or []:
+    for i, f in enumerate(d.get("foods") or []):
         n = _fdc_nutrients(f) or {k: 0.0 for k in NUTRIENTS}
-        out.append({"fdc_id": f.get("fdcId"),
+        out.append({"_i": i,
+                    "fdc_id": f.get("fdcId"),
                     "name": _fdc_name(f.get("description")),
                     "brand": (f.get("brandName") or f.get("brandOwner") or "").strip() or None,
                     "type": f.get("dataType"),
                     "kcal_100g": round(n["kcal"], 1),
                     "protein_100g": round(n["protein_g"], 1)})
-    # Stable sort, so FDC's own relevance order survives inside each group.
-    out.sort(key=lambda r: FDC_TYPE_RANK.get(r["type"], 9))
+    # Stable sort on relevance position, plus a small branded penalty so USDA's
+    # ordering is nudged rather than replaced, minus a large bonus for each
+    # dropped search term the result actually contains. The bonus dominates on
+    # purpose: if the query said "chocolate fudge" and this row says it too,
+    # that is a better answer than anything relevance alone put first.
+    def rank(r):
+        hay = (r["name"] + " " + (r["brand"] or "")).lower()
+        matched = sum(1 for w in extra if w in hay)
+        return (r["_i"]
+                + (FDC_BRANDED_PENALTY if r["type"] == "Branded" else 0)
+                - matched * 10)
+    out.sort(key=rank)
+    for r in out:
+        r.pop("_i", None)
     return {"query": q, "total": d.get("totalHits"), "items": out}
 
 
