@@ -25,11 +25,11 @@ WorkingDirectory=/home/emily/karb
 EnvironmentFile=/etc/karb.env
 ExecStart=/usr/bin/python3 /home/emily/karb/karb_server.py
 
-# Only needed while KARB_BIND uses port 80 for LAN testing. Once cloudflared
-# fronts this on 127.0.0.1:8080 the capability is dead weight and should go.
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-
+# No AmbientCapabilities. This binds 127.0.0.1:8080, so it needs no privilege
+# to reach its port and nothing off this host can reach it directly - the only
+# route in is cloudflared on this same box, and the only route through that is
+# Cloudflare Access. CAP_NET_BIND_SERVICE was here while it served :80 for LAN
+# testing; putting it back would mean it could bind a public port again.
 Restart=always
 RestartSec=2
 
