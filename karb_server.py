@@ -90,6 +90,12 @@ def load_user_map():
 
 
 class Handler(SimpleHTTPRequestHandler):
+    # Python's mimetypes table has never heard of .webmanifest, so it would go
+    # out as application/octet-stream and Chrome would ignore the manifest -
+    # which fails silently as "the install option just isn't there".
+    extensions_map = dict(SimpleHTTPRequestHandler.extensions_map)
+    extensions_map[".webmanifest"] = "application/manifest+json"
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=ROOT, **kw)
 

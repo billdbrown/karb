@@ -4,7 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Karb</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%A5%97</text></svg>">
+<!-- A fetchable icon and a manifest, which is what turns "add to home screen"
+     into an installed app rather than a bookmark with a generic glyph. The
+     icon was a data: URI before, and Chrome cannot use one of those for a
+     home-screen icon - there is no URL for it to fetch. -->
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0E9C86">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Karb">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
 /* Cronometer-inspired palette, simplified. Auto light/dark via
    prefers-color-scheme (no in-app toggle - matches the house style this app
