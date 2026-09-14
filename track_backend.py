@@ -689,6 +689,16 @@ FDC_NUTRIENTS = {"208": "kcal", "203": "protein_g", "205": "carbs_g",
 # places down, so an exact branded match still lands near the top.
 FDC_BRANDED_PENALTY = 3
 
+FDC_UNIT_WORDS = {"GRM": "g", "ONZ": "oz", "MLT": "ml", "LTR": "L"}
+
+# Nothing edible exceeds this. Pure fat is 9 kcal/g, so 100 g of oil is 884 -
+# the physical ceiling. Branded rows are manufacturer submissions and some are
+# simply wrong: Quaker's OATMEAL is filed at 1580 kcal/100 g, which would make
+# a 45 g serving 711 kcal instead of ~170. There is no way to correct such a
+# row, only to not show it, because a confidently wrong number in a food diary
+# is worse than a missing option.
+FDC_MAX_KCAL_100G = 900
+
 
 def fdc_key():
     try:
@@ -780,7 +790,14 @@ def _fdc_serving(food):
     size, unit = food.get("servingSize"), (food.get("servingSizeUnit") or "").lower()
     if size and unit in ("g", "grm", "gram"):
         # Branded: the printed label's own serving, which is authoritative.
-        label = (food.get("householdServingFullText") or "").strip()
+        # FDC appends qualifiers after a pipe ("0.667 CUP | ABOUT"), which is
+        # noise in a one-line label, and some entries shout.
+        label = (food.get("householdServingFullText") or "").split("|")[0].strip()
+        # FDC writes units as three-letter codes on some entries: "45 GRM",
+        # "4 ONZ". Expand before title-casing, or they come out as "45 Grm".
+        label = " ".join(FDC_UNIT_WORDS.get(w.upper(), w) for w in label.split())
+        if label and label == label.upper():
+            label = label.title()
         return float(size), label or ("%g g" % float(size))
     for por in food.get("foodPortions") or []:
         grams = por.get("gramWeight")
@@ -840,8 +857,12 @@ def fdc_search(query, limit=25):
     # dropped: those are the terms that describe WHICH product, and they get
     # scored against the results below. Brand-first is the order people type.
     i = len(words)
-    while not (d.get("foods") or []) and i > 1:
+    # Capped: each step is another round trip, and a five-word query would
+    # otherwise fan out to six sequential calls against a 10s timeout.
+    steps = 0
+    while not (d.get("foods") or []) and i > 1 and steps < 2:
         i -= 1
+        steps += 1
         extra = [w.lower() for w in words[i:]]
         d = hit(" ".join(words[:i]))
     if not (d.get("foods") or []):
@@ -850,13 +871,25 @@ def fdc_search(query, limit=25):
     out = []
     for i, f in enumerate(d.get("foods") or []):
         n = _fdc_nutrients(f) or {k: 0.0 for k in NUTRIENTS}
+        # Scale to a real serving here, not just after the food is picked.
+        # "123 kcal / 100 g" is unanswerable for a packaged item - nobody knows
+        # what their yogurt bar weighs, they know they ate one. The search
+        # response already carries servingSize and the household label for
+        # Branded foods, so this costs no extra request; generic rows have no
+        # serving and honestly stay per 100 g.
+        if n["kcal"] > FDC_MAX_KCAL_100G:
+            continue
+        grams, label = _fdc_serving(f)
+        factor = grams / 100.0
         out.append({"_i": i,
                     "fdc_id": f.get("fdcId"),
                     "name": _fdc_name(f.get("description")),
                     "brand": (f.get("brandName") or f.get("brandOwner") or "").strip() or None,
                     "type": f.get("dataType"),
-                    "kcal_100g": round(n["kcal"], 1),
-                    "protein_100g": round(n["protein_g"], 1)})
+                    "serving_desc": label,
+                    "serving_grams": round(grams, 1),
+                    "kcal": round(n["kcal"] * factor, 1),
+                    "protein_g": round(n["protein_g"] * factor, 1)})
     # Stable sort on relevance position, plus a small branded penalty so USDA's
     # ordering is nudged rather than replaced, minus a large bonus for each
     # dropped search term the result actually contains. The bonus dominates on

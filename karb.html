@@ -194,7 +194,11 @@ nav.tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--card);
 .fs-sub{font-size:11px;color:var(--muted);margin-top:2px;}
 .fs-kcal{text-align:right;flex-shrink:0;line-height:1.2;}
 .fs-kcal b{font-size:15px;font-weight:700;display:block;}
-.fs-kcal span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;}
+/* No text-transform: these carry the label's own wording ("1 Bar", "2 Tbsp"),
+   and shouting it makes a long one wrap. Capped so an odd serving description
+   cannot push the name column out of the row. */
+.fs-kcal span{font-size:9px;color:var(--muted);letter-spacing:.2px;display:block;
+  max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* ---------------- calendar ---------------- */
 .cal-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
@@ -963,7 +967,7 @@ async function runFoodSearch(){
         <div class="fs-name">${esc(r.name)}</div>
         <div class="fs-sub">${r.brand ? esc(r.brand) + ' &middot; ' : ''}${esc(FDC_TYPE_LABEL[r.type] || r.type || '')}</div>
       </div>
-      <div class="fs-kcal"><b>${Math.round(r.kcal_100g)}</b><span>kcal / 100 g</span></div>
+      <div class="fs-kcal"><b>${Math.round(r.kcal)}</b><span>kcal &middot; ${esc(r.serving_desc || '100 g')}</span></div>
     </div>`).join('');
 }
 
