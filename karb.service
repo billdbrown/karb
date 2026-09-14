@@ -1,4 +1,4 @@
-# Karb - nutrition tracker. Runs on LXC 110 (karb.lan, 192.168.0.110).
+# Karb - nutrition tracker. Runs on its own LXC on the house network.
 #
 # Install / update (as root):
 #   cp /home/emily/karb/karb.service /etc/systemd/system/karb.service

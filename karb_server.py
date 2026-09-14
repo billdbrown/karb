@@ -122,7 +122,7 @@ class Handler(SimpleHTTPRequestHandler):
         is a header Cloudflare sets after it has authenticated the person. A
         request that reaches the origin without it did not come through the
         tunnel, which is the case worth refusing loudest - it is what a direct
-        hit on 192.168.0.110 looks like.
+        hit on the origin's own LAN address looks like.
         """
         if AUTH_MODE == "picker":
             return None            # caller falls back to the client's claim

@@ -5,8 +5,8 @@ a handful of nutrients, and two ways to avoid typing macros by hand — describe
 language, or photograph a nutrition-facts label and let Claude read it. Barcodes are scanned
 in-browser and looked up against Open Food Facts.
 
-Written by Emily. Originally one page of [Home Dock](https://github.com/billdbrown), the kitchen
-iPad dashboard on LXC 106; extracted to its own container and hostname in September 2026.
+Written by Emily. Originally one page of Home Dock, a kitchen-iPad dashboard that is not public;
+extracted to its own container and hostname in September 2026.
 
 ## Why it left Home Dock
 
@@ -67,7 +67,7 @@ per call, so "unauthenticated" and "internet-reachable" would also mean "billabl
 
 ## Deploying
 
-    LXC 110 · karb.lan · 192.168.0.110 · Debian 13 · runs as `emily`
+    One LXC on the house network · Debian 13 · runs as `emily`
 
     /home/emily/karb            this repo
     /home/emily/karb-data       track.db + images   (the only writable path)
