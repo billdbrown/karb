@@ -663,6 +663,193 @@ def off_lookup(barcode):
     }
 
 
+
+
+
+# ---- USDA FoodData Central (needs a key) ----------------------------------
+# Open Food Facts above answers "what is this barcode". This answers "what is
+# chicken thigh", which the AI path was previously being paid to guess at.
+FDC_KEY_FILE = os.path.join(SECRETS, "usda_fdc.json")
+FDC_BASE = "https://api.nal.usda.gov/fdc/v1"
+
+# Keyed by nutrient NUMBER, never name. Names drift between datasets ("Total
+# Sugars" vs "Sugars, total including NLEA") and, worse, 208 and 268 are both
+# called "Energy" - one kcal, one kJ. Matching on the name would silently log
+# every food at 4.184x its calories.
+FDC_NUTRIENTS = {"208": "kcal", "203": "protein_g", "205": "carbs_g",
+                 "204": "fat_g", "291": "fiber_g", "307": "sodium_mg",
+                 "269": "sugar_g"}
+
+# Generic foods first, brands last. Someone typing "chicken thigh" wants the
+# food, not a frozen dinner whose label mentions it - and Branded is 433k rows
+# against ~13k for everything else, so unranked it would bury them. Survey
+# (FNDDS) leads because its rows are foods AS EATEN (roasted, skin removed),
+# which is what a diary actually logs.
+FDC_TYPE_RANK = {"Survey (FNDDS)": 0, "Foundation": 1, "SR Legacy": 2, "Branded": 3}
+
+
+def fdc_key():
+    try:
+        with open(FDC_KEY_FILE, encoding="utf-8") as f:
+            return json.load(f)["api_key"]
+    except Exception:
+        return None
+
+
+def _fdc_get(path, params=None):
+    """The key goes in a header, not the query string, so it cannot end up in
+    a proxy log or a stack trace that quotes the URL."""
+    key = fdc_key()
+    if not key:
+        raise ValueError("food search needs a USDA FoodData Central key - add "
+                         "%s with {\"api_key\": \"...\"}" % FDC_KEY_FILE)
+    url = FDC_BASE + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "X-Api-Key": key})
+    # Everything here becomes a ValueError, which the HTTP layer turns into a
+    # 400 with this text shown to the user. Letting urllib's own exception
+    # escape produced a 500 reading "HTTP Error 404: Not Found", which tells
+    # the person nothing and looks like Karb broke rather than USDA saying no.
+    try:
+        return json.load(urllib.request.urlopen(req, timeout=API_TIMEOUT))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ValueError("that food is no longer in FoodData Central")
+        if e.code in (401, 403):
+            raise ValueError("USDA rejected the API key in %s" % FDC_KEY_FILE)
+        if e.code == 429:
+            raise ValueError("USDA rate limit reached (3,600/hour) - try again shortly")
+        raise ValueError("FoodData Central error (HTTP %s)" % e.code)
+    except urllib.error.URLError as e:
+        raise ValueError("could not reach FoodData Central: %s" % e.reason)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError("FoodData Central request failed: %s" % e)
+
+
+def _fdc_nutrients(food):
+    """Per-100 g nutrients, or None if this record carries no usable numbers.
+
+    Three shapes, all from the same API: search gives nutrientNumber/value,
+    full detail gives nutrient.number/amount, abridged gives number/amount at
+    the top level. Full detail also includes group headers ("Proximates") with
+    no amount at all.
+
+    None rather than an all-zero dict is the point: a Branded detail record
+    lists foodNutrients as bare {id, amount} pairs with no nutrient number
+    anywhere, so every lookup misses and the food reads as 0 kcal. Returning
+    None lets the caller tell "genuinely zero" from "shape not understood".
+    """
+    out = {k: 0.0 for k in NUTRIENTS}
+    matched = 0
+    for n in food.get("foodNutrients") or []:
+        num = n.get("nutrientNumber")
+        if num is None:
+            num = (n.get("nutrient") or {}).get("number")
+        if num is None:
+            num = n.get("number")
+        key = FDC_NUTRIENTS.get(str(num or ""))
+        if not key:
+            continue
+        val = n.get("value")
+        if val is None:
+            val = n.get("amount")
+        if val is None:
+            continue
+        try:
+            out[key] = float(val)
+            matched += 1
+        except (TypeError, ValueError):
+            pass
+    return out if matched else None
+
+
+def _fdc_serving(food):
+    """(grams, label) for one serving. Every FDC figure is per 100 g, so this
+    is also the factor to scale by.
+
+    Storing everything as 100 g would be defensible but wrong in practice: a
+    tablespoon of peanut butter is 16 g, and offering "1 serving = 100 g"
+    invites logging six times what was eaten. Same reasoning as off_lookup's
+    preference for a product's own stated serving.
+    """
+    size, unit = food.get("servingSize"), (food.get("servingSizeUnit") or "").lower()
+    if size and unit in ("g", "grm", "gram"):
+        # Branded: the printed label's own serving, which is authoritative.
+        label = (food.get("householdServingFullText") or "").strip()
+        return float(size), label or ("%g g" % float(size))
+    for por in food.get("foodPortions") or []:
+        grams = por.get("gramWeight")
+        if not grams:
+            continue
+        amount = por.get("amount") or 1
+        unit_name = ((por.get("measureUnit") or {}).get("name") or "").strip()
+        mod = (por.get("modifier") or "").strip()
+        if unit_name and unit_name != "undetermined":
+            return float(grams), "%g %s" % (amount, unit_name)
+        # SR Legacy puts a readable unit in `modifier` ("tbsp"). FNDDS puts an
+        # internal numeric portion code there and a sentence in
+        # portionDescription ("Guideline amount per sandwich"), which makes a
+        # poor serving label - those fall through to 100 g deliberately.
+        if mod and not mod.replace(".", "").isdigit():
+            return float(grams), "%g %s" % (amount, mod)
+    return 100.0, "100 g"
+
+
+def _fdc_name(desc):
+    """FDC Branded descriptions are SHOUTED. Title-case those, but leave
+    anything already mixed-case alone rather than turning USDA into Usda."""
+    d = (desc or "").strip()
+    return d.title() if d and d == d.upper() else d
+
+
+def fdc_search(query, limit=25):
+    q = (query or "").strip()
+    if len(q) < 2:
+        raise ValueError("search needs at least two characters")
+    d = _fdc_get("/foods/search", {"query": q, "pageSize": max(1, min(int(limit), 50))})
+    out = []
+    for f in d.get("foods") or []:
+        n = _fdc_nutrients(f) or {k: 0.0 for k in NUTRIENTS}
+        out.append({"fdc_id": f.get("fdcId"),
+                    "name": _fdc_name(f.get("description")),
+                    "brand": (f.get("brandName") or f.get("brandOwner") or "").strip() or None,
+                    "type": f.get("dataType"),
+                    "kcal_100g": round(n["kcal"], 1),
+                    "protein_100g": round(n["protein_g"], 1)})
+    # Stable sort, so FDC's own relevance order survives inside each group.
+    out.sort(key=lambda r: FDC_TYPE_RANK.get(r["type"], 9))
+    return {"query": q, "total": d.get("totalHits"), "items": out}
+
+
+def fdc_item(fdc_id):
+    """Fetch one FDC food and cache it as an item, exactly as a barcode scan
+    does - same id-prefix convention, same refresh-on-fetch behaviour."""
+    fid = str(fdc_id or "").strip()
+    if not fid.isdigit():
+        raise ValueError("bad FDC id")
+    f = _fdc_get("/food/%s" % fid)
+    per100 = _fdc_nutrients(f)
+    if per100 is None:
+        # Branded records: the full format carries servingSize and the
+        # household serving but anonymises its nutrients, while the abridged
+        # format numbers them properly and drops the serving fields. Neither
+        # is sufficient alone, so fall back to a second call for the numbers
+        # and keep the serving from the first. Only Branded needs this, so it
+        # stays one request for everything else.
+        per100 = (_fdc_nutrients(_fdc_get("/food/%s" % fid, {"format": "abridged"}))
+                  or {k: 0.0 for k in NUTRIENTS})
+    grams, label = _fdc_serving(f)
+    factor = grams / 100.0
+    food = {"name": _fdc_name(f.get("description")) or "Unnamed food",
+            "brand": (f.get("brandName") or f.get("brandOwner") or "").strip() or None,
+            "serving_desc": label, "serving_grams": grams, "source": "fdc"}
+    for k in NUTRIENTS:
+        food[k] = round(per100[k] * factor, 2)
+    return _upsert_ref_item("fdc:%s" % fid, food, None)
+
 # ---------------------------------------------------------------- AI items
 def _sum_ingredients(ingredients):
     """Sum a structured per-ingredient breakdown into whole-dish totals -
@@ -1124,6 +1311,8 @@ def handle_get(path, q):
         return items_barcode((q.get("code") or [""])[0])
     if sub == "/targets":
         return targets_get(require_user(user))
+    if sub == "/search":
+        return fdc_search((q.get("q") or [""])[0])
     if sub == "/calendar":
         return calendar_range(require_user(user),
                               (q.get("from") or [""])[0], (q.get("to") or [""])[0])
@@ -1151,6 +1340,8 @@ def handle_post(path, body):
         return items_ai_photo(body.get("image_b64"), body.get("media_type"))
     if sub == "/items/import_url":
         return items_import_url(body.get("url"))
+    if sub == "/items/from_fdc":
+        return fdc_item(body.get("fdc_id"))
     if sub == "/targets":
         return targets_save(require_user(body.get("user")), body)
     raise ValueError("unknown route: " + path)

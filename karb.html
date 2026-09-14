@@ -180,6 +180,22 @@ nav.tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--card);
 
 .setting-sep{height:1px;background:var(--border);margin:16px 0 12px;}
 
+/* ---------------- food search ---------------- */
+.fs-row-input{display:flex;gap:8px;margin-bottom:12px;}
+.fs-row-input input{flex:1;min-width:0;font-size:17px;padding:12px 14px;border-radius:12px;
+  border:1.5px solid var(--border);background:var(--bg);color:var(--text);}
+.fs-row-input input:focus{border-color:var(--accent);outline:none;}
+.fs-row-input .btn{white-space:nowrap;}
+.fs-hit{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:12px;
+  border:1px solid var(--border);background:var(--bg);margin-bottom:7px;cursor:pointer;}
+.fs-hit:active{border-color:var(--accent);}
+.fs-main{flex:1;min-width:0;}
+.fs-name{font-weight:600;font-size:14px;line-height:1.3;}
+.fs-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+.fs-kcal{text-align:right;flex-shrink:0;line-height:1.2;}
+.fs-kcal b{font-size:15px;font-weight:700;display:block;}
+.fs-kcal span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;}
+
 /* ---------------- calendar ---------------- */
 .cal-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
 .cal-head button{border:1px solid var(--border);background:var(--card);color:var(--text);
@@ -771,6 +787,7 @@ function openAddSheet(defaultMeal){
   window._addMeal = defaultMeal || guessMeal();
   openModal('Add to '+MEAL_LABEL[window._addMeal], `
     <div class="action-grid">
+      <div class="action-tile" onclick="openFoodSearch()"><span class="ic">&#128269;</span><span class="lbl">Search Foods</span></div>
       <div class="action-tile" onclick="closeModal();$('#scan-file').click();"><span class="ic">&#128241;</span><span class="lbl">Scan Barcode</span></div>
       <div class="action-tile" onclick="openAiText()"><span class="ic">&#128221;</span><span class="lbl">Describe Food</span></div>
       <div class="action-tile" onclick="openPhotoLog()"><span class="ic">&#128248;</span><span class="lbl">Photo Log</span></div>
@@ -782,6 +799,7 @@ function openLibraryAddSheet(){
   _addSheetMode = 'library';
   openModal('Add to Library', `
     <div class="action-grid">
+      <div class="action-tile" onclick="openFoodSearch()"><span class="ic">&#128269;</span><span class="lbl">Search Foods</span></div>
       <div class="action-tile" onclick="closeModal();$('#scan-file').click();"><span class="ic">&#128241;</span><span class="lbl">Scan Barcode</span></div>
       <div class="action-tile" onclick="openAiText()"><span class="ic">&#128221;</span><span class="lbl">Describe Food</span></div>
       <div class="action-tile" onclick="openPhotoLog()"><span class="ic">&#128248;</span><span class="lbl">Photo Log</span></div>
@@ -901,6 +919,69 @@ function handleAiItemResult(it){
       totalGrams:it.total_grams, servings:it.servings, presetGramQty:it.log_grams});
   } else {
     reviewItem(it);
+  }
+}
+
+/* ---- Search the USDA database -------------------------------------------
+   The AI path was being paid to guess at questions a free database answers
+   exactly: "chicken thigh" is 19,967 rows in FoodData Central, several of
+   them lab-analysed. Describe Food is still the right tool for a pot of chili
+   somebody actually cooked - no database has that - so this sits beside it
+   rather than replacing it. */
+const FDC_TYPE_LABEL = {'Survey (FNDDS)':'As eaten', 'Foundation':'Lab analysed',
+                        'SR Legacy':'USDA reference', 'Branded':'Packaged'};
+
+function openFoodSearch(){
+  openModal('Search Foods', `
+    <div class="msg">USDA FoodData Central — whole foods, prepared dishes and US packaged goods.</div>
+    <div class="fs-row-input">
+      <input type="search" id="fs-q" placeholder="chicken thigh, greek yogurt, oats…"
+             autocomplete="off" enterkeyhint="search"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();runFoodSearch();}">
+      <button class="btn primary" onclick="runFoodSearch()">Search</button>
+    </div>
+    <div id="fs-results"></div>`);
+  setTimeout(() => { const el = $('#fs-q'); if (el) el.focus(); }, 60);
+}
+
+async function runFoodSearch(){
+  const q = ($('#fs-q').value || '').trim();
+  const out = $('#fs-results');
+  if (q.length < 2){ out.innerHTML = '<div class="msg">Type at least two characters.</div>'; return; }
+  out.innerHTML = '<div class="msg">Searching…</div>';
+  let d;
+  try { d = await api('/search?q=' + encodeURIComponent(q)); }
+  catch(e){ out.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; return; }
+  if (!d.items.length){
+    out.innerHTML = `<div class="msg">Nothing found for “${esc(q)}”.
+      Describe Food handles anything home-made.</div>`;
+    return;
+  }
+  out.innerHTML = d.items.map(r => `
+    <div class="fs-hit" onclick="pickFdcFood('${esc(String(r.fdc_id))}')">
+      <div class="fs-main">
+        <div class="fs-name">${esc(r.name)}</div>
+        <div class="fs-sub">${r.brand ? esc(r.brand) + ' &middot; ' : ''}${esc(FDC_TYPE_LABEL[r.type] || r.type || '')}</div>
+      </div>
+      <div class="fs-kcal"><b>${Math.round(r.kcal_100g)}</b><span>kcal / 100 g</span></div>
+    </div>`).join('');
+}
+
+async function pickFdcFood(id){
+  const out = $('#fs-results');
+  if (out) out.innerHTML = '<div class="msg">Loading…</div>';
+  try {
+    const it = await post('/items/from_fdc', {fdc_id: id});
+    if (_addSheetMode === 'library'){
+      closeModal();
+      toast('Added ' + it.name + ' to your library');
+      if (currentView === 'foods') loadFoods();
+    } else {
+      logItemNow(it);
+    }
+  } catch(e){
+    toast(e.message);
+    if (out) out.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
   }
 }
 

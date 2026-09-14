@@ -64,7 +64,8 @@ TRACK_POSTS = ("/api/track/diary", "/api/track/diary/delete",
                "/api/track/diary/move", "/api/track/diary/household",
                "/api/track/items", "/api/track/items/delete",
                "/api/track/items/ai_text", "/api/track/items/ai_photo",
-               "/api/track/items/import_url", "/api/track/targets")
+               "/api/track/items/import_url", "/api/track/items/from_fdc",
+               "/api/track/targets")
 
 IMAGE_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                "webp": "image/webp", "gif": "image/gif"}
