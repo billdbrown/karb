@@ -64,6 +64,9 @@ header.topbar{
 .datebar button{border:none;background:none;font-size:20px;color:var(--muted);cursor:pointer;padding:4px 8px;}
 .datebar .label{font-weight:700;font-size:15px;min-width:90px;text-align:center;}
 .icon-btn{border:none;background:none;font-size:20px;cursor:pointer;color:var(--muted);padding:4px 6px;display:flex;}
+.icon-btn.on{color:var(--accent-d);}
+.icon-row{display:flex;align-items:center;gap:2px;}
+.datebar.inactive{visibility:hidden;}
 .settings-wrap{display:flex;flex-direction:column;align-items:center;gap:1px;}
 .user-tag{font-size:10px;color:var(--muted);opacity:.8;line-height:1;}
 
@@ -278,9 +281,13 @@ body.viewing-other .item-row{cursor:default;}
     </div>
     <div class="settings-wrap">
       <span class="user-tag" id="user-tag"></span>
-      <button class="icon-btn" onclick="showView('settings')" title="Settings">
+      <div class="icon-row">
+      <button class="icon-btn" id="btn-calendar" onclick="showView('calendar')" title="Calendar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></button>
+      <button class="icon-btn" id="btn-settings" onclick="showView('settings')" title="Settings">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
+      </div>
     </div>
   </header>
 
@@ -318,8 +325,6 @@ body.viewing-other .item-row{cursor:default;}
   <nav class="tabbar">
     <button class="tab-btn on" id="tab-diary" onclick="showView('diary')">
       <span class="ic">&#128213;</span>Diary</button>
-    <button class="tab-btn" id="tab-calendar" onclick="showView('calendar')">
-      <span class="ic">&#128197;</span>Calendar</button>
     <button class="tab-plus" onclick="openAddSheet()">+</button>
     <button class="tab-btn" id="tab-foods" onclick="showView('foods')">
       <span class="ic">&#127822;</span>Library</button>
@@ -476,7 +481,16 @@ let currentView = 'diary';
 function showView(v){
   currentView = v;
   ['diary','calendar','foods','settings'].forEach(x => $('#view-'+x).classList.toggle('hidden', x!==v));
-  ['diary','calendar','foods'].forEach(x => $('#tab-'+x).classList.toggle('on', v===x));
+  ['diary','foods'].forEach(x => $('#tab-'+x).classList.toggle('on', v===x));
+  $('#btn-calendar').classList.toggle('on', v==='calendar');
+  $('#btn-settings').classList.toggle('on', v==='settings');
+  /* The day stepper only means something where a day is being shown. It was
+     always inert on Library and Settings; putting the calendar next to it made
+     that visible, and worse - stepping the day from the calendar moved the
+     label and re-rendered a hidden diary while the grid stayed put.
+     visibility rather than display, so the flex:1 spacer keeps the header
+     from reflowing every time the view changes. */
+  $('.datebar').classList.toggle('inactive', v!=='diary');
   if (v==='diary') loadDiary();
   else if (v==='calendar') loadCalendar();
   else if (v==='foods') loadFoods();
